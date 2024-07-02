@@ -12,6 +12,8 @@ from htm.algorithms.anomaly_likelihood import AnomalyLikelihood
 from htm.bindings.algorithms import Predictor
 
 from encoder import num_sp, token_ids, tokens
+from htm_helpers import get_columns_from_cells
+from vectordb import VectorDB, manhattan_distance
 
 _EXAMPLE_DIR = os.path.dirname(os.path.abspath(__file__))
 _INPUT_FILE_PATH = os.path.join(_EXAMPLE_DIR, "OIG-small-chip2.txt")
@@ -106,6 +108,7 @@ def main(parameters=default_parameters, argv=None, verbose=True):
   anomaly     = []
   anomalyProb = []
   predictions = {1: [], 5: []}
+  vecdb = VectorDB()
 
   token_nums = token_ids(records[:2000])
   for count, record in tqdm(enumerate(token_nums)):
@@ -124,6 +127,7 @@ def main(parameters=default_parameters, argv=None, verbose=True):
     # Create an SDR to represent active columns, This will be populated by the
     # compute method below. It must have the same dimensions as the Spatial Pooler.
     activeColumns = SDR( sp.getColumnDimensions() )
+    vecdb.add_vector(activeColumns.dense, record)
 
     # Execute Spatial Pooling algorithm over input space.
     sp.compute(encoding, True, activeColumns)
@@ -134,12 +138,18 @@ def main(parameters=default_parameters, argv=None, verbose=True):
     tm_info.addData( tm.getActiveCells().flatten() )
 
     # Predict what will happen, and then train the predictor based on what just happened.
+    tm.activateDendrites(False)
+    columns = SDR(len(activeColumns.dense))
+    columns.sparse = get_columns_from_cells(tm, tm.getPredictiveCells().sparse)
+    pred_list = vecdb.search_similar_vectors(columns.dense, k=1, distance_func=manhattan_distance)
     pdf = predictor.infer(tm.getPredictiveCells())
     for n in (1, 5):
       if pdf[n]:
         predictions[n].append( np.argmax( pdf[n] ) * predictor_resolution )
       else:
         predictions[n].append(float('nan'))
+      if n==1:
+        predictions[n][-1] = pred_list[0][1]
 
     anomaly.append( tm.anomaly )
     anomalyProb.append( anomaly_history.compute(tm.anomaly) )
@@ -171,7 +181,7 @@ def main(parameters=default_parameters, argv=None, verbose=True):
     for n in predictions: # For each [N]umber of time steps ahead which was predicted.
       val = predictions[n][ idx ]
       if not math.isnan(val):
-        accuracy[n] += (inp - val) ** 2
+        accuracy[n] += (inp - val)==0 
         accuracy_samples[n] += 1
   for n in sorted(predictions):
     accuracy[n] = (accuracy[n] / accuracy_samples[n]) ** .5

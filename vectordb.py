@@ -2,21 +2,23 @@ import numpy as np
 
 class VectorDB:
     def __init__(self):
-        self.vectors = []
-        self.texts = []
+        self.vector_map = {}
 
     def add_vector(self, vector, text):
-        self.vectors.append(vector)
-        self.texts.append(text)
+        self.vector_map[text] = vector
 
     def search_similar_vectors(self, query_vector, k, distance_func):
-        distances = [distance_func(query_vector, vector) for vector in self.vectors]
+        distances = [distance_func(query_vector, vector) for vector in self.vector_map.values()]
         indices = np.argsort(distances)[:k]
-        return [(self.vectors[i], self.texts[i]) for i in indices]
+        return [(list(self.vector_map.values())[i], list(self.vector_map.keys())[i]) for i in indices]
 
 # Example usage
 def euclidean_distance(v1, v2):
     return np.linalg.norm(v1 - v2)
+
+def manhattan_distance(v1, v2):
+    return np.sum(np.abs(v1 - v2))
+
 
 db = VectorDB()
 db.add_vector(np.array([1, 2, 3]), "Text 1")
