@@ -39,6 +39,14 @@ class HTMRegion:
         maxSynapsesPerSegment=self.tmParams["maxSynapsesPerSegment"],
         externalPredictiveInputs=self.tmParams["externalPredictiveInputs"]
         )
+    
+    def total_params(self):
+        cells = self.spParams["columnCount"] * self.tmParams["cellsPerColumn"]
+        synapses_per_cell = self.tmParams["maxSegmentsPerCell"] * self.tmParams["maxSynapsesPerSegment"] 
+        tm_params_bu = cells * synapses_per_cell
+        tm_params_td = self.tmParams["externalPredictiveInputs"] * synapses_per_cell
+        sp_params = self.spParams["columnCount"] * self.spParams["potentialRadius"]
+        return tm_params_bu + tm_params_td + sp_params
 
     def compute(self, encoding, learn=True, externalPredictiveInputsActive=0, externalPredictiveInputsWinners=0):
         self.activeColumns = SDR(self.sp.getColumnDimensions())

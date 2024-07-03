@@ -73,6 +73,8 @@ def main(parameters=default_parameters, argv=None, verbose=True):
   # Make the HTM.  SpatialPooler & TemporalMemory & associated tools.
   region2 = HTMRegion(region2_params)
   region1 = HTMRegion(region1_params)
+  print("Total Parameters:", region1.total_params() + region2.total_params())
+
   sp_info = Metrics(region1.sp.getColumnDimensions(), 999999999)
   tm_info = Metrics([region1.tm.numberOfCells()], 999999999)
 
