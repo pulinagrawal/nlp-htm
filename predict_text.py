@@ -1,6 +1,7 @@
 import os
 import math
 import numpy as np
+from pytest import param
 from tqdm import tqdm
 
 from htm.bindings.sdr import SDR, Metrics
@@ -12,7 +13,7 @@ from htm.algorithms.anomaly_likelihood import AnomalyLikelihood
 from htm.bindings.algorithms import Predictor
 
 from encoder import num_sp, token_ids, tokens
-from htm_helpers import get_columns_from_cells
+from htm_helpers import HTMRegion
 from vectordb import VectorDB, manhattan_distance
 
 _EXAMPLE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,37 +22,43 @@ _INPUT_FILE_PATH = os.path.join(_EXAMPLE_DIR, "OIG-small-chip2.txt")
 default_parameters = {
   # there are 2 (3) encoders: "value" (RDSE) & "time" (DateTime weekend, timeOfDay)
  'enc': {
-      "value" :
-         {'resolution': 0.88, 'size': 700, 'sparsity': 0.02},
-      "time": 
-         {'timeOfDay': (30, 1), 'weekend': 21}
+      "encodingWidth": 1024,
  },
  'predictor': {'sdrc_alpha': 0.1},
  'sp': {'boostStrength': 3.0,
         'columnCount': 1638,
         'localAreaDensity': 0.04395604395604396,
+        'potentialRadius': 1024,
         'potentialPct': 0.85,
         'synPermActiveInc': 0.04,
         'synPermConnected': 0.13999999999999999,
         'synPermInactiveDec': 0.006},
  'tm': {'activationThreshold': 17,
-        'cellsPerColumn': 13,
+        'cellsPerColumn': 7,
         'initialPerm': 0.21,
         'maxSegmentsPerCell': 128,
         'maxSynapsesPerSegment': 64,
         'minThreshold': 10,
         'newSynapseCount': 32,
         'permanenceDec': 0.1,
-        'permanenceInc': 0.1},
+        'permanenceInc': 0.1,
+        'externalPredictiveInputs': 0},
   'anomaly': {'period': 1000},
 }
 
 def main(parameters=default_parameters, argv=None, verbose=True):
+
+  region1_params = parameters.copy()
+  region2_params = parameters.copy()
+  region2_params['enc']['encodingWidth'] = region1_params['sp']['columnCount']*region1_params['tm']['cellsPerColumn']
+  region1_params['tm']['externalPredictiveInputs'] = region2_params['sp']['columnCount']*region2_params['tm']['cellsPerColumn']
+
   if verbose:
     import pprint
     print("Parameters:")
     pprint.pprint(parameters, indent=4)
     print("")
+
 
   # Read the input file.
   with open(_INPUT_FILE_PATH, "r") as fin:
@@ -59,112 +66,77 @@ def main(parameters=default_parameters, argv=None, verbose=True):
     records = ''.join(lines)
 
   # print(records)
-
   # Make the Encoders.  These will convert input data into binary representations.
-  encodingWidth = 1024
+  encodingWidth = parameters['enc']["encodingWidth"]
   enc_info = Metrics( [encodingWidth], 999999999 )
 
   # Make the HTM.  SpatialPooler & TemporalMemory & associated tools.
-  spParams = parameters["sp"]
-  sp = SpatialPooler(
-    inputDimensions            = (encodingWidth,),
-    columnDimensions           = (spParams["columnCount"],),
-    potentialPct               = spParams["potentialPct"],
-    potentialRadius            = encodingWidth,
-    globalInhibition           = True,
-    localAreaDensity           = spParams["localAreaDensity"],
-    synPermInactiveDec         = spParams["synPermInactiveDec"],
-    synPermActiveInc           = spParams["synPermActiveInc"],
-    synPermConnected           = spParams["synPermConnected"],
-    boostStrength              = spParams["boostStrength"],
-    wrapAround                 = True
-  )
-  sp_info = Metrics( sp.getColumnDimensions(), 999999999 )
-
-  tmParams = parameters["tm"]
-  tm = TemporalMemory(
-    columnDimensions          = (spParams["columnCount"],),
-    cellsPerColumn            = tmParams["cellsPerColumn"],
-    activationThreshold       = tmParams["activationThreshold"],
-    initialPermanence         = tmParams["initialPerm"],
-    connectedPermanence       = spParams["synPermConnected"],
-    minThreshold              = tmParams["minThreshold"],
-    maxNewSynapseCount        = tmParams["newSynapseCount"],
-    permanenceIncrement       = tmParams["permanenceInc"],
-    permanenceDecrement       = tmParams["permanenceDec"],
-    predictedSegmentDecrement = 0.0,
-    maxSegmentsPerCell        = tmParams["maxSegmentsPerCell"],
-    maxSynapsesPerSegment     = tmParams["maxSynapsesPerSegment"]
-  )
-  tm_info = Metrics( [tm.numberOfCells()], 999999999 )
+  region2 = HTMRegion(region2_params)
+  region1 = HTMRegion(region1_params)
+  sp_info = Metrics(region1.sp.getColumnDimensions(), 999999999)
+  tm_info = Metrics([region1.tm.numberOfCells()], 999999999)
 
   anomaly_history = AnomalyLikelihood(parameters["anomaly"]["period"])
 
-  predictor = Predictor( steps=[1, 5], alpha=parameters["predictor"]['sdrc_alpha'] )
+  predictor = Predictor(steps=[1, 5], alpha=parameters["predictor"]['sdrc_alpha'])
   predictor_resolution = 1
 
   # Iterate through every datum in the dataset, record the inputs & outputs.
-  inputs      = []
-  anomaly     = []
+  inputs = []
+  anomaly = []
   anomalyProb = []
   predictions = {1: [], 5: []}
   vecdb = VectorDB()
 
-  token_nums = token_ids(records[:2000])
-  for count, record in tqdm(enumerate(token_nums)):
+  token_nums = token_ids(records[:20000])
+  for count, record in tqdm(enumerate(token_nums[:2000])):
 
-    consumption = record
-    inputs.append( consumption )
+    inputs.append(record)
 
     # Call the encoders to create bit representations for each value.  These are SDR objects.
     tokenBits = num_sp(encodingWidth, 0.02, record)
 
     # Concatenate all these encodings into one large encoding for Spatial Pooling.
-    encoding = SDR( encodingWidth )
+    encoding = SDR(encodingWidth)
     encoding.dense = tokenBits.tolist()
+
+    # Compute the HTM region
+    region1.compute(encoding, True, region2.getPredictiveCells(), region2.getPredictiveCells())
+    region2.compute(region1.getActiveCells(), learn=True)
+
+    vecdb.add_vector(region1.getActiveColumns().dense, record)
+
+    # Record Encoder, Spatial Pooler & Temporal Memory statistics.
     enc_info.addData( encoding )
-
-    # Create an SDR to represent active columns, This will be populated by the
-    # compute method below. It must have the same dimensions as the Spatial Pooler.
-    activeColumns = SDR( sp.getColumnDimensions() )
-    vecdb.add_vector(activeColumns.dense, record)
-
-    # Execute Spatial Pooling algorithm over input space.
-    sp.compute(encoding, True, activeColumns)
-    sp_info.addData( activeColumns )
-
-    # Execute Temporal Memory algorithm over active mini-columns.
-    tm.compute(activeColumns, learn=True)
-    tm_info.addData( tm.getActiveCells().flatten() )
+    sp_info.addData(region1.getActiveColumns())
+    tm_info.addData(region1.getActiveCells().flatten())
 
     # Predict what will happen, and then train the predictor based on what just happened.
-    tm.activateDendrites(False)
-    columns = SDR(len(activeColumns.dense))
-    columns.sparse = get_columns_from_cells(tm, tm.getPredictiveCells().sparse)
+    columns = SDR(len(region1.getActiveColumns().dense))
+    columns.sparse = region1.get_columns_from_cells(region1.getPredictiveCells().sparse)
     pred_list = vecdb.search_similar_vectors(columns.dense, k=1, distance_func=manhattan_distance)
-    pdf = predictor.infer(tm.getPredictiveCells())
+    pdf = predictor.infer(region1.getPredictiveCells())
     for n in (1, 5):
       if pdf[n]:
-        predictions[n].append( np.argmax( pdf[n] ) * predictor_resolution )
+        predictions[n].append(np.argmax(pdf[n]) * predictor_resolution)
       else:
         predictions[n].append(float('nan'))
-      if n==1:
+      if n == 1:
         predictions[n][-1] = pred_list[0][1]
 
-    anomaly.append( tm.anomaly )
-    anomalyProb.append( anomaly_history.compute(tm.anomaly) )
+    anomaly.append(region1.tm.anomaly)
+    anomalyProb.append(anomaly_history.compute(region1.tm.anomaly))
 
-    predictor.learn(count, tm.getPredictiveCells(), int(consumption / predictor_resolution))
-
+    predictor.learn(count, region1.getPredictiveCells(), int(record))
 
   # Print information & statistics about the state of the HTM.
   print("Encoded Input", enc_info)
   print("")
   print("Spatial Pooler Mini-Columns", sp_info)
-  print(str(sp))
+  print(str(region1.sp))
   print("")
   print("Temporal Memory Cells", tm_info)
-  print(str(tm))
+  print(str(region1.tm))
   print("")
 
   # Shift the predictions so that they are aligned with the input they predict.
