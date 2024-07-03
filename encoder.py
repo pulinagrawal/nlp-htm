@@ -1,4 +1,3 @@
-import token
 from transformers import AutoTokenizer
 from functools import lru_cache
 import numpy as np
@@ -6,6 +5,7 @@ import numpy as np
 tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 
 token_ids = lambda text: tokenizer.encode(text)
+stringify = lambda token_ids: tokenizer.decode(token_ids)
 tokens = lambda text: tokenizer.tokenize(text)
 
 @lru_cache(maxsize=1000)

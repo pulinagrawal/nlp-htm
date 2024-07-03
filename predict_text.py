@@ -1,18 +1,13 @@
 import os
 import math
 import numpy as np
-from pytest import param
 from tqdm import tqdm
 
 from htm.bindings.sdr import SDR, Metrics
-from htm.encoders.rdse import RDSE, RDSE_Parameters
-from htm.encoders.date import DateEncoder
-from htm.bindings.algorithms import SpatialPooler
-from htm.bindings.algorithms import TemporalMemory
 from htm.algorithms.anomaly_likelihood import AnomalyLikelihood
 from htm.bindings.algorithms import Predictor
 
-from encoder import num_sp, token_ids, tokens
+from encoder import num_sp, token_ids, stringify
 from htm_helpers import HTMRegion
 from vectordb import VectorDB, manhattan_distance
 
@@ -26,7 +21,7 @@ default_parameters = {
  },
  'predictor': {'sdrc_alpha': 0.1},
  'sp': {'boostStrength': 3.0,
-        'columnCount': 1638,
+        'columnCount': 2000,
         'localAreaDensity': 0.04395604395604396,
         'potentialRadius': 1024,
         'potentialPct': 0.85,
@@ -34,9 +29,9 @@ default_parameters = {
         'synPermConnected': 0.13999999999999999,
         'synPermInactiveDec': 0.006},
  'tm': {'activationThreshold': 17,
-        'cellsPerColumn': 7,
+        'cellsPerColumn': 15,
         'initialPerm': 0.21,
-        'maxSegmentsPerCell': 128,
+        'maxSegmentsPerCell': 180,
         'maxSynapsesPerSegment': 64,
         'minThreshold': 10,
         'newSynapseCount': 32,
@@ -46,18 +41,18 @@ default_parameters = {
   'anomaly': {'period': 1000},
 }
 
+vecdb = VectorDB()
+
 def main(parameters=default_parameters, argv=None, verbose=True):
 
   region1_params = parameters.copy()
-  region2_params = parameters.copy()
-  region2_params['enc']['encodingWidth'] = region1_params['sp']['columnCount']*region1_params['tm']['cellsPerColumn']
-  region1_params['tm']['externalPredictiveInputs'] = region2_params['sp']['columnCount']*region2_params['tm']['cellsPerColumn']
 
   if verbose:
     import pprint
     print("Parameters:")
     pprint.pprint(parameters, indent=4)
     print("")
+
 
 
   # Read the input file.
@@ -71,9 +66,8 @@ def main(parameters=default_parameters, argv=None, verbose=True):
   enc_info = Metrics( [encodingWidth], 999999999 )
 
   # Make the HTM.  SpatialPooler & TemporalMemory & associated tools.
-  region2 = HTMRegion(region2_params)
   region1 = HTMRegion(region1_params)
-  print("Total Parameters:", region1.total_params() + region2.total_params())
+  print("Total Parameters:", region1.total_params() )
 
   sp_info = Metrics(region1.sp.getColumnDimensions(), 999999999)
   tm_info = Metrics([region1.tm.numberOfCells()], 999999999)
@@ -88,7 +82,6 @@ def main(parameters=default_parameters, argv=None, verbose=True):
   anomaly = []
   anomalyProb = []
   predictions = {1: [], 5: []}
-  vecdb = VectorDB()
 
   token_nums = token_ids(records[:20000])
   for count, record in tqdm(enumerate(token_nums[:2000])):
@@ -103,8 +96,7 @@ def main(parameters=default_parameters, argv=None, verbose=True):
     encoding.dense = tokenBits.tolist()
 
     # Compute the HTM region
-    region1.compute(encoding, True, region2.getPredictiveCells(), region2.getPredictiveCells())
-    region2.compute(region1.getActiveCells(), learn=True)
+    region1.compute(encoding, True)
 
     vecdb.add_vector(region1.getActiveColumns().dense, record)
 
@@ -157,6 +149,7 @@ def main(parameters=default_parameters, argv=None, verbose=True):
       if not math.isnan(val):
         accuracy[n] += (inp - val)==0 
         accuracy_samples[n] += 1
+
   for n in sorted(predictions):
     accuracy[n] = (accuracy[n] / accuracy_samples[n]) ** .5
     print("Predictive Error (RMS)", n, "steps ahead:", accuracy[n])
@@ -193,8 +186,50 @@ def main(parameters=default_parameters, argv=None, verbose=True):
     plt.legend(labels=('Input', 'Instantaneous Anomaly', 'Anomaly Likelihood'))
     plt.show()
 
-  return -accuracy[5]
+  return region1
 
+def predict_next_words(htm_model, last_text='', num_words=1):
+  if last_text:
+    token_nums = token_ids(last_text)
+    for count, record in tqdm(enumerate(token_nums[:-1])):
+
+      run_model(htm_model, learn=True, record=record)
+    
+    next_words = []
+
+    while True:
+      # Predict what will happen, and then train the predictor based on what just happened.
+      columns = SDR(len(htm_model.getActiveColumns().dense))
+      columns.sparse = htm_model.get_columns_from_cells(htm_model.getPredictiveCells().sparse)
+      pred_list = vecdb.search_similar_vectors(columns.dense, k=1, distance_func=manhattan_distance)
+
+      next_words.append(pred_list[0][1])
+      num_words -= 1
+
+      if num_words > 0:
+        run_model(htm_model, learn=False, record=pred_list[0][1])
+      else:
+        break
+
+    return stringify(next_words)
+
+
+def run_model(htm_model, learn, record):
+    # Call the encoders to create bit representations for each value.  These are SDR objects.
+    tokenBits = num_sp(htm_model.encodingWidth, 0.02, record)
+
+      # Concatenate all these encodings into one large encoding for Spatial Pooling.
+    encoding = SDR(htm_model.encodingWidth)
+    encoding.dense = tokenBits.tolist()
+
+      # Compute the HTM region
+    htm_model.compute(encoding, learn)
+
+    vecdb.add_vector(htm_model.getActiveColumns().dense, record)
 
 if __name__ == "__main__":
-  main()
+  htm_model = main()
+  while True:
+    text = input("Enter text: ")
+    print(predict_next_words(htm_model, text, 5))
+    print("")
