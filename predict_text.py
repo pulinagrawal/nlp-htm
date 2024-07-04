@@ -21,7 +21,7 @@ default_parameters = {
  },
  'predictor': {'sdrc_alpha': 0.1},
  'sp': {'boostStrength': 3.0,
-        'columnCount': 2000,
+        'columnCount': 1638,
         'localAreaDensity': 0.04395604395604396,
         'potentialRadius': 1024,
         'potentialPct': 0.85,
@@ -29,9 +29,9 @@ default_parameters = {
         'synPermConnected': 0.13999999999999999,
         'synPermInactiveDec': 0.006},
  'tm': {'activationThreshold': 17,
-        'cellsPerColumn': 15,
+        'cellsPerColumn': 7,
         'initialPerm': 0.21,
-        'maxSegmentsPerCell': 180,
+        'maxSegmentsPerCell': 128,
         'maxSynapsesPerSegment': 64,
         'minThreshold': 10,
         'newSynapseCount': 32,
@@ -46,13 +46,15 @@ vecdb = VectorDB()
 def main(parameters=default_parameters, argv=None, verbose=True):
 
   region1_params = parameters.copy()
+  region2_params = parameters.copy()
+  region2_params['enc']['encodingWidth'] = region1_params['sp']['columnCount']*region1_params['tm']['cellsPerColumn']
+  region1_params['tm']['externalPredictiveInputs'] = region2_params['sp']['columnCount']*region2_params['tm']['cellsPerColumn']
 
   if verbose:
     import pprint
     print("Parameters:")
     pprint.pprint(parameters, indent=4)
     print("")
-
 
 
   # Read the input file.
@@ -66,8 +68,9 @@ def main(parameters=default_parameters, argv=None, verbose=True):
   enc_info = Metrics( [encodingWidth], 999999999 )
 
   # Make the HTM.  SpatialPooler & TemporalMemory & associated tools.
+  region2 = HTMRegion(region2_params)
   region1 = HTMRegion(region1_params)
-  print("Total Parameters:", region1.total_params() )
+  print("Total Parameters:", region1.total_params() + region2.total_params())
 
   sp_info = Metrics(region1.sp.getColumnDimensions(), 999999999)
   tm_info = Metrics([region1.tm.numberOfCells()], 999999999)
@@ -96,7 +99,8 @@ def main(parameters=default_parameters, argv=None, verbose=True):
     encoding.dense = tokenBits.tolist()
 
     # Compute the HTM region
-    region1.compute(encoding, True)
+    region1.compute(encoding, True, region2.getPredictiveCells(), region2.getPredictiveCells())
+    region2.compute(region1.getActiveCells(), learn=True)
 
     vecdb.add_vector(region1.getActiveColumns().dense, record)
 
