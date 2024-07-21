@@ -20,6 +20,13 @@ def manhattan_distance(v1, v2):
     return np.sum(np.abs(v1 - v2))
 
 
+def token_likelihood(reconstruction, vectordb):
+    prob = F.softmax(reconstruction, dim=0)
+    keys, values = vectordb.vector_map.keys(), vectordb.vector_map.values()
+    reps = torch.Tensor(list(values))
+    token_probs = F.softmax(F.kl_div(torch.log(prob), reps, reduction='none').sum(dim=1))
+    return keys, token_probs
+
 db = VectorDB()
 db.add_vector(np.array([1, 2, 3]), "Text 1")
 db.add_vector(np.array([4, 5, 6]), "Text 2")
