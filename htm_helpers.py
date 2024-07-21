@@ -1,6 +1,85 @@
+from collections import defaultdict
+from utils.tsort import topological_sort_kahn
 import numpy as np
 from htm.bindings.sdr import SDR
 from htm.bindings.algorithms import SpatialPooler, TemporalMemory
+
+from utils.tsort import topological_sort_kahn
+
+LINK_TYPES = ["BU", "TD", "FF_LATERAL"]
+
+class HTMModel:
+  def __init__(self):
+    self.regions = {}
+    self.region_params = {}
+    self.links = defaultdict(dict) 
+
+  def add_region(self, name, region_params, class_obj):
+    self.region_params[name] = region_params
+    self.regions[name] = class_obj(region_params)
+
+  def add_link(self, src_region_name, dest_region_name, type):
+    if dest_region_name not in self.links:
+      self.links[dest_region_name] = defaultdict(list)
+    self.links[dest_region_name][type].append(src_region_name)
+  
+  def _get_total_cells(self, region_name):
+    return self.regions[region_name].total_cells_count()
+
+  def initialize(self):
+    for region_name, region_params in self.region_params.items():
+      for link_type in self.links.get(region_name, {}):
+        match link_type:
+          case "BU":
+            dest_enc_width = sum(self._get_total_cells(linked_region) for linked_region in self.links[region_name][link_type])
+            self.region_params[region_name]["enc"]["encodingWidth"] = dest_enc_width
+          case "TD":
+            external_predictive_inputs = sum(self._get_total_cells(linked_region) for linked_region in self.links[region_name][link_type])
+            self.region_params[region_name]["tm"]["externalPredictiveInputs"] = external_predictive_inputs  
+          case "FF_LATERAL":
+            raise NotImplementedError("FF_LATERAL not implemented yet")
+
+      self.regions[region_name] = HTMRegion(region_params)
+    self.compute_order = self._get_compute_order()
+
+  def region_pairs(self):
+    ordered_pairs = []
+    for dest_region_name, link_types in self.links.items():
+      if "BU" in link_types:
+        ordered_pairs.extend((src_region_name, dest_region_name) for src_region_name in link_types["BU"])
+    return ordered_pairs
+
+  def _get_compute_order(self):
+    region_pairs = self.region_pairs()
+    adjacency_dict = {}
+    for src_region, dest_region in region_pairs:
+      if src_region not in adjacency_dict:
+        adjacency_dict[src_region] = []
+      if dest_region not in adjacency_dict:
+        adjacency_dict[dest_region] = []  # Add regions without outgoing links as dictionary keys
+      adjacency_dict[src_region].append(dest_region)
+    ordered_regions = topological_sort_kahn(adjacency_dict)
+    return ordered_regions
+
+  def compute(self, inputs):
+    for region_name in self.compute_order:
+      if self.regions[region_name].__class__.__name__ == "HTMInputRegion":
+        self.regions[region_name].compute(inputs[region_name])
+      else:
+        bu_input = []
+        td_input = []
+        for linked_region, link_type in self.links[region_name]:
+          if link_type == "BU":
+            bu_input.extend(self.regions[region_name].getActiveColumns().dense)
+          elif link_type == "TD":
+            td_input.extend(self.regions[region_name].getPredictedColumns().dense)
+          elif link_type == "FF_LATERAL":
+            raise NotImplementedError("FF_LATERAL not implemented yet")
+
+        bu_sdr = SDR(len(bu_input))
+        td_sdr = SDR(len(td_input))
+        self.regions[region_name].compute(bu_sdr, True, td_sdr, td_sdr)
+
 
 class HTMRegion:
   def __init__(self, parameters):
@@ -64,6 +143,9 @@ class HTMRegion:
   def getActiveCells(self):
     return self.tm.getActiveCells()
 
+  def total_cells_count(self):
+    return self.sp.getNumColumns() * self.tm.getCellsPerColumn()
+
   def getPredictiveCells(self):
     if not self.externalPredictiveInputsWinners and not self.externalPredictiveInputsActive:
       self.tm.activateDendrites(False)
@@ -88,3 +170,25 @@ class HTMRegion:
     columns = SDR(len(self.getActiveColumns().dense))
     columns.sparse = self.get_columns_from_cells(self.getPredictiveCells().sparse)
     return columns
+
+
+class HTMInputRegion(HTMRegion):
+  def __init__(self, encodingWidth=0):
+    self.last_data = SDR((encodingWidth,)) 
+
+  def compute(self, data):
+    self.last_data = data
+    return data
+
+  def getActiveColumns(self):
+    return self.last_data
+  
+  def getActiveCells(self):
+    return self.last_data
+
+  def getPredictiveCells(self):
+    return self.last_data
+
+  def total_cells_count(self):
+    return self.last_data.dense.size
+
