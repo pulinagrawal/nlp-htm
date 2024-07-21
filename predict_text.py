@@ -1,6 +1,7 @@
 import os
 import math
 import numpy as np
+from torch import le
 from tqdm import tqdm
 
 from htm.bindings.sdr import SDR, Metrics
@@ -8,7 +9,7 @@ from htm.algorithms.anomaly_likelihood import AnomalyLikelihood
 from htm.bindings.algorithms import Predictor
 
 from encoder import num_sp, token_ids, stringify
-from htm_helpers import HTMRegion
+from htm_helpers import HTMInputRegion, HTMModel, HTMRegion
 from vectordb import VectorDB, manhattan_distance
 
 _EXAMPLE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -45,10 +46,6 @@ vecdb = VectorDB()
 
 def main(parameters=default_parameters, argv=None, verbose=True):
 
-  region1_params = parameters.copy()
-  region2_params = parameters.copy()
-  region2_params['enc']['encodingWidth'] = region1_params['sp']['columnCount']*region1_params['tm']['cellsPerColumn']
-  region1_params['tm']['externalPredictiveInputs'] = region2_params['sp']['columnCount']*region2_params['tm']['cellsPerColumn']
 
   if verbose:
     import pprint
@@ -67,13 +64,18 @@ def main(parameters=default_parameters, argv=None, verbose=True):
   encodingWidth = parameters['enc']["encodingWidth"]
   enc_info = Metrics( [encodingWidth], 999999999 )
 
-  # Make the HTM.  SpatialPooler & TemporalMemory & associated tools.
-  region2 = HTMRegion(region2_params)
-  region1 = HTMRegion(region1_params)
-  print("Total Parameters:", region1.total_params() + region2.total_params())
+  model = HTMModel()
+  model.add_region("token_region", {"encodingWidth": encodingWidth }, HTMInputRegion)
+  model.add_region("region1", parameters, HTMRegion)
+  model.add_region("region2", parameters, HTMRegion)
 
-  sp_info = Metrics(region1.sp.getColumnDimensions(), 999999999)
-  tm_info = Metrics([region1.tm.numberOfCells()], 999999999)
+  model.add_link("token_region", "region1", "BU")
+  model.add_link("region1", "region2", "BU")
+  model.add_link("region2", "region1", "TD")
+  model.initialize()
+  # Make the HTM.  SpatialPooler & TemporalMemory & associated tools.
+  sp_info = Metrics(model["region1"].sp.getColumnDimensions(), 999999999)
+  tm_info = Metrics([model["region1"].tm.numberOfCells()], 999999999)
 
   anomaly_history = AnomalyLikelihood(parameters["anomaly"]["period"])
 
@@ -99,21 +101,20 @@ def main(parameters=default_parameters, argv=None, verbose=True):
     encoding.dense = tokenBits.tolist()
 
     # Compute the HTM region
-    region1.compute(encoding, True, region2.getPredictiveCells(), region2.getPredictiveCells())
-    region2.compute(region1.getActiveCells(), learn=True)
+    model.compute({"token_region": encoding}, learn=True)
 
-    vecdb.add_vector(region1.getActiveColumns().dense, record)
+    vecdb.add_vector(model["region1"].getActiveColumns().dense, record)
 
     # Record Encoder, Spatial Pooler & Temporal Memory statistics.
     enc_info.addData( encoding )
-    sp_info.addData(region1.getActiveColumns())
-    tm_info.addData(region1.getActiveCells().flatten())
+    sp_info.addData(model["region1"].getActiveColumns())
+    tm_info.addData(model["region1"].getActiveCells().flatten())
 
     # Predict what will happen, and then train the predictor based on what just happened.
-    columns = SDR(len(region1.getActiveColumns().dense))
-    columns.sparse = region1.get_columns_from_cells(region1.getPredictiveCells().sparse)
+    columns = SDR(len(model["region1"].getActiveColumns().dense))
+    columns.sparse = model["region1"].get_columns_from_cells(model["region1"].getPredictiveCells().sparse)
     pred_list = vecdb.search_similar_vectors(columns.dense, k=1, distance_func=manhattan_distance)
-    pdf = predictor.infer(region1.getPredictiveCells())
+    pdf = predictor.infer(model["region1"].getPredictiveCells())
     for n in (1, 5):
       if pdf[n]:
         predictions[n].append(np.argmax(pdf[n]) * predictor_resolution)
@@ -122,19 +123,19 @@ def main(parameters=default_parameters, argv=None, verbose=True):
       if n == 1:
         predictions[n][-1] = pred_list[0][1]
 
-    anomaly.append(region1.tm.anomaly)
-    anomalyProb.append(anomaly_history.compute(region1.tm.anomaly))
+    anomaly.append(model["region1"].tm.anomaly)
+    anomalyProb.append(anomaly_history.compute(model["region1"].tm.anomaly))
 
-    predictor.learn(count, region1.getPredictiveCells(), int(record))
+    predictor.learn(count, model["region1"].getPredictiveCells(), int(record))
 
   # Print information & statistics about the state of the HTM.
   print("Encoded Input", enc_info)
   print("")
   print("Spatial Pooler Mini-Columns", sp_info)
-  print(str(region1.sp))
+  print(str(model["region1"].sp))
   print("")
   print("Temporal Memory Cells", tm_info)
-  print(str(region1.tm))
+  print(str(model["region1"].tm))
   print("")
 
   # Shift the predictions so that they are aligned with the input they predict.
@@ -190,7 +191,7 @@ def main(parameters=default_parameters, argv=None, verbose=True):
     plt.legend(labels=('Input', 'Instantaneous Anomaly', 'Anomaly Likelihood'))
     plt.show()
 
-  return region1
+  return model["region1"]
 
 def predict_next_words(htm_model, last_text='', num_words=1):
   if last_text:
