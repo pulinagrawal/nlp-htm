@@ -42,10 +42,8 @@ default_parameters = {
   'anomaly': {'period': 1000},
 }
 
-vecdb = VectorDB()
 
 def main(parameters=default_parameters, argv=None, verbose=True):
-
 
   if verbose:
     import pprint
@@ -64,15 +62,27 @@ def main(parameters=default_parameters, argv=None, verbose=True):
   encodingWidth = parameters['enc']["encodingWidth"]
   enc_info = Metrics( [encodingWidth], 999999999 )
 
+  vecdb = VectorDB()
   model = HTMModel()
-  model.add_region("token_region", {"encodingWidth": encodingWidth }, HTMInputRegion)
+  model.add_region("token_region", {"encodingWidth": encodingWidth}, HTMInputRegion)
   model.add_region("region1", parameters, HTMRegion)
   model.add_region("region2", parameters, HTMRegion)
+  model.add_region("region3", parameters, HTMRegion)
+  model.add_region("region4", parameters, HTMRegion)
+  model.add_region("region5", parameters, HTMRegion)
 
   model.add_link("token_region", "region1", "BU")
   model.add_link("region1", "region2", "BU")
   model.add_link("region2", "region1", "TD")
+  model.add_link("region2", "region3", "BU")
+  model.add_link("region3", "region2", "TD")
+  model.add_link("region3", "region4", "BU")
+  model.add_link("region4", "region3", "TD")
+  model.add_link("region4", "region5", "BU")
+  model.add_link("region5", "region4", "TD")
+
   model.initialize()
+
   # Make the HTM.  SpatialPooler & TemporalMemory & associated tools.
   sp_info = Metrics(model["region1"].sp.getColumnDimensions(), 999999999)
   tm_info = Metrics([model["region1"].tm.numberOfCells()], 999999999)
