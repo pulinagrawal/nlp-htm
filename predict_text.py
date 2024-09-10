@@ -68,18 +68,12 @@ def main(parameters=default_parameters, argv=None, verbose=True):
   model.add_region("region1", parameters, HTMRegion)
   model.add_region("region2", parameters, HTMRegion)
   model.add_region("region3", parameters, HTMRegion)
-  model.add_region("region4", parameters, HTMRegion)
-  model.add_region("region5", parameters, HTMRegion)
 
   model.add_link("token_region", "region1", "BU")
   model.add_link("region1", "region2", "BU")
   model.add_link("region2", "region1", "TD")
   model.add_link("region2", "region3", "BU")
   model.add_link("region3", "region2", "TD")
-  model.add_link("region3", "region4", "BU")
-  model.add_link("region4", "region3", "TD")
-  model.add_link("region4", "region5", "BU")
-  model.add_link("region5", "region4", "TD")
 
   model.initialize()
 
@@ -96,7 +90,7 @@ def main(parameters=default_parameters, argv=None, verbose=True):
   inputs = []
   anomaly = []
   anomalyProb = []
-  predictions = {1: [], 5: []}
+  predictions = {1: []}
 
   token_nums = token_ids(records[:20000])
   for count, record in tqdm(enumerate(token_nums[:2000])):
@@ -125,7 +119,7 @@ def main(parameters=default_parameters, argv=None, verbose=True):
     columns.sparse = model["region1"].get_columns_from_cells(model["region1"].getPredictiveCells().sparse)
     pred_list = vecdb.search_similar_vectors(columns.dense, k=1, distance_func=manhattan_distance)
     pdf = predictor.infer(model["region1"].getPredictiveCells())
-    for n in (1, 5):
+    for n in (1, ):
       if pdf[n]:
         predictions[n].append(np.argmax(pdf[n]) * predictor_resolution)
       else:
@@ -159,14 +153,12 @@ def main(parameters=default_parameters, argv=None, verbose=True):
   accuracy_samples = {1: 0, 5: 0}
 
   for idx, inp in enumerate(inputs):
-    for n in predictions: # For each [N]umber of time steps ahead which was predicted.
-      val = predictions[n][ idx ]
-      if not math.isnan(val):
-        accuracy[n] += (inp - val)==0 
-        accuracy_samples[n] += 1
+    val = predictions[1][ idx ]
+    accuracy[1] += (inp == val) 
+    accuracy_samples[1] += 1
 
   for n in sorted(predictions):
-    accuracy[n] = (accuracy[n] / accuracy_samples[n]) ** .5
+    accuracy[n] = (accuracy[n] / accuracy_samples[n]) 
     print("Predictive Error (RMS)", n, "steps ahead:", accuracy[n])
 
   # Show info about the anomaly (mean & std)
@@ -186,8 +178,7 @@ def main(parameters=default_parameters, argv=None, verbose=True):
     plt.xlabel("Time")
     plt.ylabel("Power Consumption")
     plt.plot(np.arange(len(inputs)), inputs, 'red',
-             np.arange(len(inputs)), predictions[1], 'blue',
-             np.arange(len(inputs)), predictions[5], 'green',)
+             np.arange(len(inputs)), predictions[1], 'blue')
     plt.legend(labels=('Input', '1 Step Prediction, Shifted 1 step', '5 Step Prediction, Shifted 5 steps'))
 
     plt.subplot(2,1,2)
