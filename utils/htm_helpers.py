@@ -5,6 +5,11 @@ from copy import deepcopy
 from htm.bindings.sdr import SDR
 from htm.bindings.algorithms import SpatialPooler, TemporalMemory
 
+import sys
+import pathlib
+sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
+from sparsey.htm_sparsey import HTMSparsey
+
 from utils.tsort import topological_sort_kahn
 
 LINK_TYPES = ["BU", "TD", "FF_LATERAL"]
@@ -69,6 +74,8 @@ class HTMModel:
     return ordered_regions
 
   def compute(self, inputs, learn=True):
+    if not self.compute_order:
+      raise ValueError("Model not initialized. Call initialize() before calling compute()")
     for region_name in self.compute_order:
       if self.regions[region_name].__class__.__name__ == "HTMInputRegion":
         self.regions[region_name].compute(inputs[region_name])
@@ -101,25 +108,28 @@ class HTMRegion:
     self.encodingWidth = parameters["enc"]["encodingWidth"]
     self.externalPredictiveInputsActive = 0
     self.externalPredictiveInputsWinners = 0
-    self.sp = SpatialPooler(
-    inputDimensions=(self.encodingWidth,),
-    columnDimensions=(self.spParams["columnCount"],),
-    potentialPct=self.spParams["potentialPct"],
-    potentialRadius=self.spParams["potentialRadius"],
-    globalInhibition=True,
-    localAreaDensity=self.spParams["localAreaDensity"],
-    synPermInactiveDec=self.spParams["synPermInactiveDec"],
-    synPermActiveInc=self.spParams["synPermActiveInc"],
-    synPermConnected=self.spParams["synPermConnected"],
-    boostStrength=self.spParams["boostStrength"],
-    wrapAround=True
-    )
+    if self.spParams["model"] == 'nupic':
+      self.spat = SpatialPooler(
+      inputDimensions=(self.encodingWidth,),
+      columnDimensions=(self.spParams["columnCount"],),
+      potentialPct=self.spParams["potentialPct"],
+      potentialRadius=self.spParams["potentialRadius"],
+      globalInhibition=True,
+      localAreaDensity=self.spParams["localAreaDensity"],
+      synPermInactiveDec=self.spParams["synPermInactiveDec"],
+      synPermActiveInc=self.spParams["synPermActiveInc"],
+      synPermConnected=self.spParams["synPermConnected"],
+      boostStrength=self.spParams["boostStrength"],
+      wrapAround=True
+      )
+    elif self.spParams["model"] == 'sparsey':
+      self.spat = HTMSparsey(self.spParams)
     self.tm = TemporalMemory(
     columnDimensions=(self.spParams["columnCount"],),
     cellsPerColumn=self.tmParams["cellsPerColumn"],
     activationThreshold=self.tmParams["activationThreshold"],
     initialPermanence=self.tmParams["initialPerm"],
-    connectedPermanence=self.spParams["synPermConnected"],
+    connectedPermanence=self.tmParams["synPermConnected"],
     minThreshold=self.tmParams["minThreshold"],
     maxNewSynapseCount=self.tmParams["newSynapseCount"],
     permanenceIncrement=self.tmParams["permanenceInc"],
@@ -139,8 +149,8 @@ class HTMRegion:
     return tm_params_bu + tm_params_td + sp_params
 
   def compute(self, encoding, learn=True, externalPredictiveInputsActive=0, externalPredictiveInputsWinners=0):
-    self.activeColumns = SDR(self.sp.getColumnDimensions())
-    self.sp.compute(encoding, True, self.activeColumns)
+    self.activeColumns = SDR(self.spat.getColumnDimensions())
+    self.spat.compute(encoding, True, self.activeColumns)
     if not externalPredictiveInputsWinners and not externalPredictiveInputsActive:
       self.tm.compute(self.activeColumns, learn)
     else:
@@ -155,7 +165,7 @@ class HTMRegion:
     return self.tm.getActiveCells()
 
   def total_cells_count(self):
-    return self.sp.getNumColumns() * self.tm.getCellsPerColumn()
+    return self.spat.getNumColumns() * self.tm.getCellsPerColumn()
 
   def getPredictiveCells(self):
     if not self.externalPredictiveInputsWinners and not self.externalPredictiveInputsActive:
@@ -171,10 +181,10 @@ class HTMRegion:
     return list(columns)
 
   def get_sp_reconstruction(self, active_columns):
-    reconstruction = np.zeros(self.sp.getNumInputs(), dtype=np.float32)
+    reconstruction = np.zeros(self.spat.getNumInputs(), dtype=np.float32)
     for col in active_columns:
-      permanences = np.array(self.sp.getPermanence(col, np.ndarray(1, dtype=np.int32), 0))
-      reconstruction += (permanences > self.sp.getSynPermConnected()).astype(int)
+      permanences = np.array(self.spat.getPermanence(col, np.ndarray(1, dtype=np.int32), 0))
+      reconstruction += (permanences > self.spat.getSynPermConnected()).astype(int)
     return reconstruction
 
   def getPredictedColumns(self):

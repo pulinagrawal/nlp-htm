@@ -13,7 +13,7 @@ from htm.encoders.scalar_encoder import ScalarEncoder, ScalarEncoderParameters
 from htm.encoders.date import DateEncoder
 
 from encoder import num_sp, token_ids, stringify
-from htm_helpers import HTMInputRegion, HTMModel, HTMRegion
+from utils.htm_helpers import HTMInputRegion, HTMModel, HTMRegion
 from vectordb import VectorDB, manhattan_distance
 
 import yfinance as yf

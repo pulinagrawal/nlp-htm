@@ -9,7 +9,7 @@ from htm.algorithms.anomaly_likelihood import AnomalyLikelihood
 from htm.bindings.algorithms import Predictor
 
 from encoder import num_sp, token_ids, stringify
-from htm_helpers import HTMInputRegion, HTMModel, HTMRegion
+from utils.htm_helpers import HTMInputRegion, HTMModel, HTMRegion
 from vectordb import VectorDB, manhattan_distance
 
 _EXAMPLE_DIR = os.path.dirname(os.path.abspath(__file__))
