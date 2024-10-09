@@ -1,7 +1,6 @@
 import os
 import math
 import numpy as np
-from torch import le
 from tqdm import tqdm
 
 from htm.bindings.sdr import SDR, Metrics
@@ -67,13 +66,10 @@ def main(parameters=default_parameters, argv=None, verbose=True):
   model.add_region("token_region", {"encodingWidth": encodingWidth}, HTMInputRegion)
   model.add_region("region1", parameters, HTMRegion)
   model.add_region("region2", parameters, HTMRegion)
-  model.add_region("region3", parameters, HTMRegion)
 
   model.add_link("token_region", "region1", "BU")
   model.add_link("region1", "region2", "BU")
   model.add_link("region2", "region1", "TD")
-  model.add_link("region2", "region3", "BU")
-  model.add_link("region3", "region2", "TD")
 
   model.initialize()
 
@@ -124,8 +120,6 @@ def main(parameters=default_parameters, argv=None, verbose=True):
         predictions[n].append(np.argmax(pdf[n]) * predictor_resolution)
       else:
         predictions[n].append(float('nan'))
-      if n == 1:
-        predictions[n][-1] = pred_list[0][1]
 
     anomaly.append(model["region1"].tm.anomaly)
     anomalyProb.append(anomaly_history.compute(model["region1"].tm.anomaly))
@@ -164,6 +158,12 @@ def main(parameters=default_parameters, argv=None, verbose=True):
   # Show info about the anomaly (mean & std)
   print("Anomaly Mean", np.mean(anomaly))
   print("Anomaly Std ", np.std(anomaly))
+
+  for i, j in zip(inputs[1:], predictions[1][1:]):
+    if j != j:
+      j = 0
+    if i: 
+      print(f'{stringify(int(i)):>15}', f'{ stringify(int(j)):<15}')
 
   # Plot the Predictions and Anomalies.
   if verbose:
