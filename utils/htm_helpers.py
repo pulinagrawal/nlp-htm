@@ -8,7 +8,6 @@ from htm.bindings.algorithms import SpatialPooler, TemporalMemory
 import sys
 import pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent))
-from sparsey.htm_sparsey import HTMSparsey
 
 from utils.tsort import topological_sort_kahn
 
