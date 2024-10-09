@@ -1,5 +1,5 @@
 import unittest
-from utils.htm_helpers import HTMModel
+from htm_helpers import HTMModel
 
 class TestHTMModel(unittest.TestCase):
     def test_get_compute_order(self):
