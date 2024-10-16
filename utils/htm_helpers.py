@@ -4,6 +4,8 @@ import numpy as np
 from copy import deepcopy
 from htm.bindings.sdr import SDR
 from htm.bindings.algorithms import SpatialPooler, TemporalMemory
+from utils.sp import SpatialPoolerShim as SpatialPooler
+from utils.temporal_memory import TemporalMemoryShim as TemporalMemory
 
 import sys
 import pathlib
@@ -108,7 +110,7 @@ class HTMRegion:
     self.externalPredictiveInputsActive = 0
     self.externalPredictiveInputsWinners = 0
     if self.spParams["model"] == 'nupic':
-      self.spat = SpatialPooler(
+      self.sp = SpatialPooler(
       inputDimensions=(self.encodingWidth,),
       columnDimensions=(self.spParams["columnCount"],),
       potentialPct=self.spParams["potentialPct"],
@@ -122,7 +124,7 @@ class HTMRegion:
       wrapAround=True
       )
     elif self.spParams["model"] == 'sparsey':
-      self.spat = HTMSparsey(self.spParams)
+      self.sp = HTMSparsey(self.spParams)
     self.tm = TemporalMemory(
     columnDimensions=(self.spParams["columnCount"],),
     cellsPerColumn=self.tmParams["cellsPerColumn"],
@@ -148,8 +150,8 @@ class HTMRegion:
     return tm_params_bu + tm_params_td + sp_params
 
   def compute(self, encoding, learn=True, externalPredictiveInputsActive=0, externalPredictiveInputsWinners=0):
-    self.activeColumns = SDR(self.spat.getColumnDimensions())
-    self.spat.compute(encoding, True, self.activeColumns)
+    self.activeColumns = SDR(self.sp.getColumnDimensions())
+    self.sp.compute(encoding, True, self.activeColumns)
     if not externalPredictiveInputsWinners and not externalPredictiveInputsActive:
       self.tm.compute(self.activeColumns, learn)
     else:
@@ -164,7 +166,7 @@ class HTMRegion:
     return self.tm.getActiveCells()
 
   def total_cells_count(self):
-    return self.spat.getNumColumns() * self.tm.getCellsPerColumn()
+    return self.sp.getNumColumns() * self.tm.getCellsPerColumn()
 
   def getPredictiveCells(self):
     if not self.externalPredictiveInputsWinners and not self.externalPredictiveInputsActive:
@@ -180,10 +182,10 @@ class HTMRegion:
     return list(columns)
 
   def get_sp_reconstruction(self, active_columns):
-    reconstruction = np.zeros(self.spat.getNumInputs(), dtype=np.float32)
+    reconstruction = np.zeros(self.sp.getNumInputs(), dtype=np.float32)
     for col in active_columns:
-      permanences = np.array(self.spat.getPermanence(col, np.ndarray(1, dtype=np.int32), 0))
-      reconstruction += (permanences > self.spat.getSynPermConnected()).astype(int)
+      permanences = np.array(self.sp.getPermanence(col, np.ndarray(1, dtype=np.int32), 0))
+      reconstruction += (permanences > self.sp.getSynPermConnected()).astype(int)
     return reconstruction
 
   def getPredictedColumns(self):
