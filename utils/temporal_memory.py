@@ -29,6 +29,7 @@ from htm.bindings.math import Random
 from operator import mul
 
 from utils.connections import Connections
+from htm.bindings.sdr import SDR
 from utils.sdr_helpers import to_sdr
 from utils.group_by import groupby2
 binSearch = lambda x, y: x[y]
@@ -769,8 +770,8 @@ class TemporalMemory:
     candidates = list(prevWinnerCells)
 
     for synapse in connections.synapsesForSegment(segment):
-      i = binSearch(candidates, synapse.presynapticCell)
-      if i != -1:
+      if synapse.presynapticCell in candidates:
+        i = candidates.index(synapse.presynapticCell)
         del candidates[i]
 
     nActual = min(nDesiredNewSynapes, len(candidates))
@@ -811,7 +812,7 @@ class TemporalMemory:
     for synapse in connections.synapsesForSegment(segment):
       permanence = synapse.permanence
 
-      if binSearch(prevActiveCells, synapse.presynapticCell) != -1:
+      if synapse.presynapticCell in prevActiveCells:
         permanence += permanenceIncrement
       else:
         permanence -= permanenceDecrement
@@ -1366,14 +1367,29 @@ class TemporalMemoryShim(TemporalMemory):
   def __init__(self, *args, **kwargs):  
     super().__init__(*args, **kwargs)
     self._wrapper = to_sdr(self.numberOfColumns(), self.cellsPerColumn)
-    self._wrapped_funcs = ['getActiveCells', 'getWinnerCells', 'getPredictiveCells']
+    self._wrapped_funcs = ['getActiveCells', 'getWinnerCells']
     for func in dir(self):
       if func in self._wrapped_funcs:
         setattr(self, func, self._wrapper(getattr(self, func)))
+    self.externalPredictions = SDR(self.numberOfColumns()*self.cellsPerColumn)
+    self.externalPredictions.sparse = []
+
+  def activateDendrites(self, learn=True, externalPredictiveInputsActive=None, externalPredictiveInputsWinners=None):
+    self.externalPredictions = externalPredictiveInputsActive
+    return super().activateDendrites(learn)
 
   def compute(self, activeColumns, learn=True, externalPredictiveInputsActive=None, externalPredictiveInputsWinners=None):
+    self.externalPredictions = externalPredictiveInputsActive
     return super().compute(activeColumns.sparse, learn)
 
+  def getPredictiveCells(self):
+    predictiveCells = super().getPredictiveCells()
+    if self.externalPredictions is not None:
+      predictiveCells += self.externalPredictions.sparse.tolist()
+    resultant_predictions = SDR(self.numberOfColumns()*self.cellsPerColumn)
+    resultant_predictions.sparse = list(set(predictiveCells))
+    return resultant_predictions
+ 
   
 
 if __name__ == '__main__':

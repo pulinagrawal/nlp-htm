@@ -147,8 +147,6 @@ def main(model_size=None, parameters=default_parameters, argv=None, verbose=True
       else:
         predictions[n].append(float('nan'))
 
-    anomaly.append(model["region1"].tm.anomaly )
-    anomalyProb.append( anomaly_history.compute(model["region1"].tm.anomaly) )
 
     predictor.learn(count, model["region1"].tm.getPredictiveCells(), int(consumption / predictor_resolution))
 

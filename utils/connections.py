@@ -86,6 +86,8 @@ class Synapse(object):
     self.permanence = permanence
     self._ordinal = ordinal
 
+  def __hash__(self):
+    return hash((self.segment.cell, self.presynapticCell))
 
   def __eq__(self, other):
     """ Explicitly implement this for unit testing. Allow floating point
@@ -324,7 +326,8 @@ class Connections:
   def _removeSynapseFromPresynapticMap(self, synapse):
     inputSynapses = self._synapsesForPresynapticCell[synapse.presynapticCell]
 
-    inputSynapses.remove(synapse)
+    if synapse in inputSynapses:
+      inputSynapses.remove(synapse)
 
     if len(inputSynapses) == 0:
       del self._synapsesForPresynapticCell[synapse.presynapticCell]
