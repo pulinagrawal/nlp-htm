@@ -173,7 +173,7 @@ class TemporalMemory:
   # ==============================
 
 
-  def compute(self, activeColumns, learn=True):
+  def compute(self, activeColumns, learn=True, externalPredictiveInputsActive=0, externalPredictiveInputsWinners=0):
     """
     Perform one time step of the Temporal Memory algorithm.
 
@@ -186,7 +186,7 @@ class TemporalMemory:
 
     :param learn: (bool) Whether or not learning is enabled.
     """
-    self.activateCells(sorted(activeColumns), learn)
+    self.activateCells(sorted(activeColumns), learn, externalPredictiveInputsActive)
     self.activateDendrites(learn)
 
 
@@ -516,7 +516,8 @@ class TemporalMemory:
           cls._growSynapses(connections, random, segment, nGrowDesired,
                             prevWinnerCells, initialPermanence,
                             maxSynapsesPerSegment)
-
+    # Add cells to activeCells if cell was predicted by externalPredictiveInputs
+    # get bestMatchingSegment for the cellsToAdd and adaptSegment and growSynapses on that segment
     return cellsToAdd
 
 
@@ -1380,12 +1381,17 @@ class TemporalMemoryShim(TemporalMemory):
 
   def compute(self, activeColumns, learn=True, externalPredictiveInputsActive=None, externalPredictiveInputsWinners=None):
     self.externalPredictions = externalPredictiveInputsActive
-    return super().compute(activeColumns.sparse, learn)
+    super().activateCells(sorted(activeColumns.sparse), learn)
+    for cell in self.externalPredictions.sparse:
+      if self.columnForCell(cell) in activeColumns.sparse:
+        self.activeCells.append(cell)
+    self.activeCells = set(self.activeCells)
+    super().activateDendrites(learn)
 
   def getPredictiveCells(self):
     predictiveCells = super().getPredictiveCells()
-    if self.externalPredictions is not None:
-      predictiveCells += self.externalPredictions.sparse.tolist()
+    # if self.externalPredictions is not None:
+    #   predictiveCells += self.externalPredictions.sparse.tolist()
     resultant_predictions = SDR(self.numberOfColumns()*self.cellsPerColumn)
     resultant_predictions.sparse = list(set(predictiveCells))
     return resultant_predictions
