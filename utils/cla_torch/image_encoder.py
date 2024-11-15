@@ -148,6 +148,7 @@ def topk_per_location(output, k):
     output = output.permute(1, 2, 0)  # Shape: [H, W, num_filters]
     # Apply topk over the filter dimension
     topk_values, topk_indices = torch.topk(output, k=k, dim=2)
+    
     return topk_values, topk_indices
 
 def binary_topk_encoding(topk_indices, num_filters):
@@ -310,10 +311,12 @@ def main():
             output = encoder(input_image)
             topk_values, topk_indices = topk_per_location(output, k)
             num_filters = output.shape[0]
-            binary_encoding = binary_topk_encoding(topk_indices, num_filters)
+            mask = torch.zeros_like(output.permute(2,1,0))
+            # Place the top k values into the mask at the correct positions
+            masked_encoding = mask.scatter_(dim=2, index=topk_indices, src=topk_values)
             input_shape = input_image.shape
             reconstructed_image = reconstruct_from_binary_encoding(
-                binary_encoding, encoder, input_shape)
+                masked_encoding, encoder, input_shape)
             reconstructed_image = reconstructed_image[:, 2:-2, 2:-2]  # Remove padding
             reconstructed_image = reconstructed_image.detach().numpy().squeeze(0)
             reconstructed_image = np.clip(reconstructed_image, 0, 1)
