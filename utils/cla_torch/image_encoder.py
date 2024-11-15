@@ -213,7 +213,7 @@ def main():
 
     # Set up the figure and axes
     fig, axes = plt.subplots(2, num_images, figsize=(num_images * 2, 6))
-    plt.subplots_adjust(left=0.05, bottom=0.25, right=0.95, top=0.9, wspace=0.8, hspace=0.2)
+    plt.subplots_adjust(left=0.05, bottom=0.1, right=0.95, top=0.9, wspace=0.8, hspace=0.2)
 
     # Display the original images
     reconstructed_images = []

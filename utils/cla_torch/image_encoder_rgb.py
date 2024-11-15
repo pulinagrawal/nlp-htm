@@ -145,7 +145,7 @@ def main():
 
     # Create sliders
     s_n_filters = Slider(
-        ax_n_filters, 'n_filters', 10, 1000, valinit=n_filters, valstep=1)
+        ax_n_filters, 'n_filters', 10, 100, valinit=n_filters, valstep=1)
     s_filter_size = Slider(
         ax_filter_size, 'filter_size', 3, 15, valinit=filter_size, valstep=1)
     s_std_dev_min = Slider(
@@ -289,15 +289,12 @@ def main():
             b_val_input_images.append(b_input_image)
         
             # Update original image display
-            ax_original_r.imshow(r_val_input_images[i].squeeze(0).numpy(), cmap='gray')
-            ax_original_r.set_title(f'Red - Label: {labels[i]}')
-            ax_original_r.axis('off')
-            ax_original_g.imshow(g_val_input_images[i].squeeze(0).numpy(), cmap='gray')
-            ax_original_g.set_title(f'Green')
-            ax_original_g.axis('off')
-            ax_original_b.imshow(b_val_input_images[i].squeeze(0).numpy(), cmap='gray')
-            ax_original_b.set_title(f'Blue')
-            ax_original_b.axis('off')
+            original_displays_r[i].imshow(r_val_input_images[i].squeeze(0).numpy(), cmap='Reds')
+            original_displays_r[i].set_title(f'Red - Label: {labels[i]}')
+            original_displays_g[i].imshow(g_val_input_images[i].squeeze(0).numpy(), cmap='Greens')
+            original_displays_g[i].set_title(f'Green')
+            original_displays_b[i].imshow(b_val_input_images[i].squeeze(0).numpy(), cmap='Blues')
+            original_displays_b[i].set_title(f'Blue')
 
         update(None)  # Reconstruct with new images
 
