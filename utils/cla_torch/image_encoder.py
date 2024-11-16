@@ -11,7 +11,7 @@ from matplotlib.widgets import Slider, Button
 
 # Existing Encoder class and functions
 class ImageEncoder(torch.nn.Module):
-    def __init__(self, n_filters=50, filter_size=8, std_dev_range=(0.2, 0.4), center_range=(3, 5), sparsity=0.7):
+    def __init__(self, n_filters=50, filter_size=8, std_dev_range=(0.2, 0.4), center_range=(3, 5), sparsity=0.7, device='cpu'):
         super(ImageEncoder, self).__init__()
         self.n_filters = n_filters
         self.filter_size = filter_size
@@ -69,28 +69,39 @@ class ImageBinEncoder(ImageEncoder):
       topk_values, topk_indices = torch.topk(output, k=k, dim=2)
       return topk_values, topk_indices
 
-  def binary_topk_encoding(self, topk_indices, num_filters):
-      """
-      Creates a binary representation of the top-k encoding output.
+def binary_topk_encoding(topk_indices, topk_values, num_filters, threshold):
+    """
+    Creates a binary representation of the top-k encoding output, setting indices to 1
+    only if the corresponding activation values are greater than the threshold.
 
-      Args:
-          topk_indices (torch.Tensor): Indices of the top-k filters per spatial location, shape [H, W, k]
-          num_filters (int): Total number of filters (in_channels * n_filters)
+    Args:
+        topk_indices (torch.Tensor): Indices of the top-k filters per spatial location, shape [H, W, k]
+        topk_values (torch.Tensor): Activation values of the top-k filters per spatial location, shape [H, W, k]
+        num_filters (int): Total number of filters (in_channels * n_filters)
+        threshold (float): Threshold value. Only activation values greater than this will be set in the encoding.
 
-      Returns:
-          binary_encoding (torch.Tensor): Binary tensor indicating presence of top-k filters at each location,
-                                          shape [H, W, num_filters], dtype torch.float32
-      """
-      H, W, k = topk_indices.shape
-      # Flatten H and W dimensions
-      topk_indices_flat = topk_indices.view(-1, k)  # Shape: [H*W, k]
-      # Create binary encoding
-      binary_encoding_flat = torch.zeros((H*W, num_filters), dtype=torch.float32)
-      # Use scatter to set the top-k indices to 1
-      binary_encoding_flat.scatter_(dim=1, index=topk_indices_flat, value=1)
-      # Reshape back to [H, W, num_filters]
-      binary_encoding = binary_encoding_flat.view(H, W, num_filters)
-      return binary_encoding
+    Returns:
+        binary_encoding (torch.Tensor): Binary tensor indicating presence of top-k filters at each location,
+                                        shape [H, W, num_filters], dtype torch.float32
+    """
+    H, W, k = topk_indices.shape
+    # Flatten H and W dimensions
+    topk_indices_flat = topk_indices.view(-1, k)  # Shape: [H*W, k]
+    topk_values_flat = topk_values.view(-1, k)    # Shape: [H*W, k]
+
+    # Apply threshold to activation values
+    mask = topk_values_flat > threshold  # Shape: [H*W, k]
+
+    # Create binary encoding
+    binary_encoding_flat = torch.zeros((H*W, num_filters), dtype=torch.float32)
+    # Use scatter to set the top-k indices to 1 where activation values are above threshold
+    indices_to_set = topk_indices_flat[mask]
+    positions = torch.nonzero(mask)
+    binary_encoding_flat[positions[:, 0], indices_to_set] = 1
+
+    # Reshape back to [H, W, num_filters]
+    binary_encoding = binary_encoding_flat.view(H, W, num_filters)
+    return binary_encoding
 
 def reconstruct_from_binary_encoding(binary_encoding, encoder, input_shape):
     """
